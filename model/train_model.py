@@ -41,7 +41,7 @@ X_train_vec = vectorizer.fit_transform(X_train)
 X_test_vec = vectorizer.transform(X_test)
 
 print("Training model...")
-model = LogisticRegression(max_iter=1000, C=1.0)
+model = LogisticRegression(max_iter=1000, C=1.0, class_weight="balanced")
 model.fit(X_train_vec, y_train)
 
 print("\n--- Model Performance ---")

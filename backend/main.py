@@ -24,6 +24,53 @@ model = joblib.load("model/helpfulness_model.pkl")
 vectorizer = joblib.load("model/tfidf_vectorizer.pkl")
 print("Model loaded successfully!")
 
+def score_review(title, text):
+    combined = (title + " " + text).strip()
+    word_count = len(combined.split())
+    unique_words = len(set(combined.lower().split()))
+    total_words = max(word_count, 1)
+    vocab_ratio = unique_words / total_words
+
+    # Run model FIRST
+    vectorized = vectorizer.transform([combined])
+    prediction = int(model.predict(vectorized)[0])
+    confidence = float(model.predict_proba(vectorized)[0].max())
+
+    # THEN apply overrides
+    words = combined.lower().split()
+    word_freq = {}
+    for w in words:
+        word_freq[w] = word_freq.get(w, 0) + 1
+    max_repetition = max(word_freq.values())
+
+    spam_words = {"buy", "now", "click", "order", "deal", "offer", "discount"}
+    has_spam = any(w in spam_words for w in words)
+
+    if max_repetition >= 4 or (max_repetition >= 2 and has_spam):
+        prediction = 0
+        confidence = 0.92
+
+    # Ignore common English words in vocab check
+    stopwords = {"the", "a", "an", "and", "or", "but", "in", "on", "at", "to", 
+                "for", "of", "with", "this", "it", "is", "was", "i", "my", "me"}
+
+    meaningful_words = [w for w in combined.lower().split() if w not in stopwords]
+    unique_meaningful = len(set(meaningful_words))
+    total_meaningful = max(len(meaningful_words), 1)
+    vocab_ratio = unique_meaningful / total_meaningful
+
+    # Use meaningful_words for repetition check too
+    word_freq = {}
+    for w in meaningful_words:
+        word_freq[w] = word_freq.get(w, 0) + 1
+    max_repetition = max(word_freq.values()) if word_freq else 0
+
+    if word_count < 8:
+        prediction = 0
+        confidence = 0.95
+
+    return bool(prediction), round(confidence, 3)
+
 # --- Data shapes ---
 class ReviewInput(BaseModel):
     text: str
@@ -90,6 +137,7 @@ def analyze_reviews(data: BatchReviewInput):
         "total_analyzed": len(results),
         "helpful_count": sum(1 for r in results if r["helpful"])
     }
+
 
 @app.post("/summarize")
 async def summarize_reviews(data: BatchReviewInput):
@@ -195,12 +243,8 @@ async def scrape_and_analyze(data: URLInput):
     # Score with model
     results = []
     for review in reviews:
-        combined = review["title"] + " " + review["text"]
-        vectorized = vectorizer.transform([combined])
-        prediction = model.predict(vectorized)[0]
-        confidence = float(model.predict_proba(vectorized)[0].max())
-        results.append({**review, "helpful": bool(prediction), "confidence": confidence})
-
+        helpful, confidence = score_review(review["title"], review["text"])
+        results.append({**review, "helpful": helpful, "confidence": confidence})
     positive = sorted(
         [r for r in results if r["rating"] >= 4 and r["helpful"]],
         key=lambda x: x["confidence"], reverse=True

@@ -17,10 +17,23 @@ print(f"Total reviews loaded: {len(df)}")
 # If less than 30% said helpful → label it 0 (not helpful)
 # Reviews with too few votes are dropped (unreliable)
 
-df = df[df["HelpfulnessDenominator"] >= 5]  # at least 5 votes
 df["helpfulness_ratio"] = df["HelpfulnessNumerator"] / df["HelpfulnessDenominator"]
-df = df[df["helpfulness_ratio"] != 0.5]  # drop ambiguous middle ground
-df["label"] = (df["helpfulness_ratio"] >= 0.7).astype(int)
+
+# Only keep reviews where we're CERTAIN about helpfulness
+df_helpful = df[
+    (df["HelpfulnessDenominator"] >= 10) &
+    (df["helpfulness_ratio"] >= 0.80)  # 80%+ voted helpful
+].copy()
+df_helpful["label"] = 1
+
+df_not_helpful = df[
+    (df["HelpfulnessDenominator"] >= 10) &
+    (df["helpfulness_ratio"] <= 0.20)  # 80%+ voted NOT helpful
+].copy()
+df_not_helpful["label"] = 0
+
+# Drop all the ambiguous middle ground
+df = pd.concat([df_helpful, df_not_helpful])
 
 print(f"Reviews after filtering: {len(df)}")
 print(f"Helpful (1): {df['label'].sum()} | Not Helpful (0): {(df['label'] == 0).sum()}")
@@ -41,7 +54,11 @@ X_train_vec = vectorizer.fit_transform(X_train)
 X_test_vec = vectorizer.transform(X_test)
 
 print("Training model...")
-model = LogisticRegression(max_iter=1000, C=1.0, class_weight="balanced")
+from sklearn.svm import LinearSVC
+from sklearn.calibration import CalibratedClassifierCV
+
+svc = LinearSVC(max_iter=2000, C=1.0, class_weight='balanced')
+model = CalibratedClassifierCV(svc)
 model.fit(X_train_vec, y_train)
 
 print("\n--- Model Performance ---")
